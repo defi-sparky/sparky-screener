@@ -1,0 +1,68 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sparky CA Check</title>
+<style>
+:root{--bg:#eceee9;--ink:#1b2430;--mute:#6b7683;--line:#d6dad3;--up:#0f8a5f;--down:#c4344a;--warn:#b7791f}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,sans-serif}
+.w{max-width:760px;margin:0 auto;padding:22px 16px 60px}h1{margin:0 0 4px;font-size:22px}.sub{color:var(--mute);font-size:13px;margin-bottom:14px}
+.row{display:flex;gap:8px;flex-wrap:wrap}input,select,button{font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink)}
+#ca{flex:1;min-width:240px}button{background:var(--ink);color:#fff;border-color:var(--ink);cursor:pointer}button:disabled{opacity:.5}
+:focus-visible{outline:2px solid #2a4bd7;outline-offset:1px}
+#out{margin-top:16px}.card{background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:12px}
+.hd{padding:14px 16px;display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}.sym{font-size:19px;font-weight:600}
+.pill{padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600}.HIGH{background:#d9f1e7;color:#0b6446}.MEDIUM{background:#fbeccd;color:#85560f}.SKIP{background:#e8eae6;color:#555}.REJECT{background:#f6dadf;color:#9b2237}
+table{width:100%;border-collapse:collapse}td{padding:9px 16px;border-top:1px solid var(--line)}td:first-child{color:var(--mute);width:42%}td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.up,.ALIVE{color:var(--up)}.down,.DEAD{color:var(--down)}.DYING{color:var(--warn)}.note{padding:10px 16px;color:var(--mute);font-size:13px;border-top:1px solid var(--line)}
+h2{margin:0;padding:10px 16px;font-size:14px;background:#f6f7f4;border-top:1px solid var(--line)}a{color:#2a4bd7}
+</style></head><body><div class="w">
+<h1>Sparky CA Check</h1><div class="sub">Paste a Solana token address. <a href="/scanner.html">Open the multi-token scanner</a></div>
+<div class="row"><input id="ca" placeholder="Paste contract address" autocomplete="off" spellcheck="false">
+<select id="tf" aria-label="Candle size"><option value="minute:5">5m</option><option value="minute:15" selected>15m</option><option value="hour:1">1h</option></select>
+<button id="go">Check</button></div><div id="out" aria-live="polite"></div></div>
+<script>
+const $=i=>document.getElementById(i),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=x=>x==null?'?':x>=1e9?'$'+(x/1e9).toFixed(2)+'B':x>=1e6?'$'+(x/1e6).toFixed(2)+'M':x>=1e3?'$'+(x/1e3).toFixed(1)+'K':'$'+x.toFixed(0);
+const p1=x=>x==null?'?':x.toFixed(1)+'%';
+const age=h=>h==null?'?':h<1?Math.round(h*60)+' min':h<48?h.toFixed(0)+' hours':(h/24).toFixed(0)+' days';
+const R=(a,b,c='')=>`<tr><td>${a}</td><td class="${c}">${b}</td></tr>`;
+const V=(c,t)=>`<span class="${c}">${t}</span>`;
+const sec=(t,badge,body)=>`<h2>${t}${badge?` <span style="float:right">${badge}</span>`:''}</h2><table>${body}</table>`;
+function show(r){
+  if(r.error){$('out').innerHTML=`<div class="card"><div class="hd down">${esc(r.error)}</div></div>`;return}
+  const H=r.h,gm='Needs GMGN key',crowd=r.insider==null?null:(r.sniper||0)+r.insider+(r.bundler||0),L=H.levels;
+  const links=(r.links||[]).filter(l=>/^https?:\/\//.test(l.u)).map(l=>`<a href="${esc(l.u)}" target="_blank" rel="noopener">${esc(l.l)}</a>`).join(' · ');
+  const vc={'STRONG BUY':'HIGH','GAMBLE / QUICK SCALP ONLY':'MEDIUM',"DON'T BUY":'REJECT'}[H.verdict];
+  const yn=b=>b?V('up','yes'):V('down','no'), w=H.whale, d=H.dev, t=H.team, a=H.alive, c=H.chart;
+  $('out').innerHTML=`<div class="card"><div class="hd"><div><span class="sym">${esc(r.sym)}</span> <span class="sub">${esc(r.name||'')}</span></div>
+    <span class="pill ${vc}">${H.verdict} · ${H.total.toFixed(1)}/40</span></div>
+    ${r.rej.length?`<div class="note down">Hard-filter failures: ${esc(r.rej.join(', '))}</div>`:''}
+    ${sec('Your data','',`${R('MCap',fmt(r.mc))}${R('% from ATH',r.ath==null?'?':r.ath.toFixed(0)+'%'+(r.athMc?' (ATH '+fmt(r.athMc)+')':''),r.ath<=-50?'down':'')}
+    ${R('Age',age(r.ageH))}${R('Vol/MCap',r.vmc.toFixed(0)+'%')}${R('Top 10 holders',p1(r.top10),r.top10>35?'down':'')}
+    ${R('Insiders+',crowd==null?'?':crowd.toFixed(1)+'%',crowd>25?'down':'')}${R('Smart $',r.smart==null?gm:r.smart+' wallets')}
+    ${R('Bundle',r.bundler==null?gm:p1(r.bundler))}${R('State',a.state,a.state)}${R('Token fee',r.fee==null?'?':r.fee+'%',r.fee>0?'down':'')}`)}
+    ${sec('1. Whale check',`${w.label} · ${w.score.toFixed(1)}/10`,`${R('Holders / Makers / 24h volume',`${w.holders??'?'} / ${w.makers??'?'} / ${fmt(r.v24)}`)}
+    ${R('24h trades',w.txs.toLocaleString())}${R('Volume per maker',w.volPerMaker==null?'?':'$'+w.volPerMaker.toFixed(0))}
+    ${R('Holders per maker',w.holdPerMaker==null?'?':w.holdPerMaker.toFixed(2)+(w.holdPerMaker<.2?' (mostly flippers)':' (traders are holding)'))}
+    ${R('Top 10 buying or selling',w.flow||gm,w.flow==='selling'?'down':w.flow==='buying'?'up':'')}${R('Top 10 in profit',w.profit?`${w.profit.up} of ${w.profit.of}`:gm)}`)}
+    ${sec('2. Dev check',`${d.label} · ${d.score.toFixed(1)}/10`,`${R('Dev holds',d.dev==null?'?':d.dev.toFixed(1)+'%')}${R('LP locked or burned',d.lp==null?'?':d.lp.toFixed(0)+'%')}
+    ${R('Dev dumped (1 candle up, -80%, no bounce)',yn(d.dumped).replace('yes','DEV DUMPED'))}${R('Held support 1h+ after a dump',d.support?V('up','yes'):'no')}
+    ${d.notes.length?`<tr><td colspan="2" style="text-align:left">${esc(d.notes.join(' · '))}</td></tr>`:''}`)}
+    ${sec('3. Team / community',`${t.label} · ${t.score.toFixed(1)}/10`,`${R('Holders growing',t.growing==null?'Unknown (first check, re-check later)':yn(t.growing))}${R('Makers (24h)',w.makers??'?')}${R('24h trades',w.txs.toLocaleString())}`)}
+    ${sec('4. Alive or dead',a.state,`${R('24h volume above $500k',yn(a.checks.vol))}${R('Over 10k trades in the last hour',yn(a.checks.tx1h))}${R('Holders above 1,000',yn(a.checks.holders))}${R('Above -85% from ATH',yn(a.checks.ath))}
+    ${R('No buys in 30 min',a.noBuys30==null?'?':yn(a.noBuys30))}${R('Trades dropping',yn(a.dropping))}`)}
+    ${sec('5. Chart (MACD, KDJ, RSI)',`${c.score.toFixed(1)}/10`,c.macd?`${R('MACD histogram',c.macd.hist>0?V('up','positive'):V('down','negative'))}${R('MACD bullish cross (recent)',yn(c.macd.cross))}
+    ${R('KDJ K / D / J',`${c.kdj.k.toFixed(0)} / ${c.kdj.d.toFixed(0)} / ${c.kdj.j.toFixed(0)}`)}${R('RSI · signal',c.rsi.toFixed(0)+' · '+esc(c.signal||''))}`:R('Candles','Not available'))}
+    <h2>Final verdict <span style="float:right">${H.verdict}</span></h2>
+    <div class="note">Whale ${w.score.toFixed(1)} + Dev ${d.score.toFixed(1)} + Team ${t.score.toFixed(1)} + Chart ${c.score.toFixed(1)} = ${H.total.toFixed(1)}/40</div>
+    ${L?`<table>${R('Entry (market cap)',L.entryLo?fmt(L.entryLo)+' to '+fmt(L.entryHi):fmt(L.entry))}${R('TP1',fmt(L.tp1),'up')}${R('TP2',fmt(L.tp2),'up')}${R('SL',fmt(L.sl),'down')}</table>`:'<div class="note">No entry given for a Don’t buy verdict.</div>'}
+    <h2>Narrative</h2><div class="note" style="color:inherit">${r.desc?esc(r.desc):'No description in the token metadata.'}${links?`<div style="margin-top:6px">${links}</div>`:''}</div>
+    <div class="note">Multi-X filter: ${r.verdict} · ${r.total.toFixed(1)}/50 · ${pass(r)}</div>
+    ${r.warn&&r.warn.length?`<div class="note" style="color:var(--warn)">RugCheck warnings: ${esc(r.warn.join(', '))}</div>`:''}
+    ${r.miss.length?`<div class="note">Missing: ${esc(r.miss.join(', '))}</div>`:''}</div>`;
+}
+const pass=r=>r.verdict==='REJECT'?'failed hard filters':'passed hard filters';
+async function go(){
+  const ca=$('ca').value.trim();if(!ca)return;$('go').disabled=true;$('out').innerHTML='<div class="sub">Checking… this takes about 10 seconds.</div>';
+  try{show(await (await fetch('/api/token?ca='+encodeURIComponent(ca)+'&tf='+$('tf').value)).json())}catch(e){show({error:'Request failed: '+e.message})}
+  $('go').disabled=false}
+$('go').onclick=go;$('ca').onkeydown=e=>{if(e.key==='Enter')go()};
+</script></body></html>

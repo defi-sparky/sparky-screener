@@ -1,0 +1,64 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sparky Screener</title>
+<style>
+:root{--bg:#eceee9;--ink:#1b2430;--mute:#6b7683;--line:#d6dad3;--up:#0f8a5f;--down:#c4344a;--warn:#b7791f}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,sans-serif}
+header{padding:16px 20px 4px}h1{margin:0;font-size:21px}.sub{color:var(--mute);font-size:13px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;padding:10px 20px;align-items:center}
+input,select,button{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink)}
+input[type=number]{width:96px}button{background:var(--ink);color:#fff;border-color:var(--ink);cursor:pointer}button:disabled{opacity:.5}
+:focus-visible{outline:2px solid #2a4bd7;outline-offset:1px}
+#status{padding:0 20px 8px;color:var(--mute);font-size:13px}.wrap{margin:0 20px 40px;overflow-x:auto;background:#fff;border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;min-width:1100px}th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;font-variant-numeric:tabular-nums}
+th:first-child,td:first-child{text-align:left}th{color:var(--mute);font-weight:500;cursor:pointer;background:#fff;position:sticky;top:0}
+.sym{font-weight:600}.sm{font-size:12px;color:var(--mute)}.up{color:var(--up)}.down{color:var(--down)}
+.pill{padding:2px 8px;border-radius:99px;font-size:12px;font-weight:600}.HIGH{background:#d9f1e7;color:#0b6446}.MEDIUM{background:#fbeccd;color:#85560f}
+.SKIP{background:#e8eae6;color:#555}.REJECT{background:#f6dadf;color:#9b2237}.ALIVE{color:var(--up)}.DYING{color:var(--warn)}.DEAD{color:var(--down)}
+</style></head><body>
+<header><h1>Sparky Screener</h1><div class="sub">Solana tokens scored out of 50 for multi-X potential. Hard filters run first.</div></header>
+<div class="bar">
+<select id="mode"><option value="trend">Trending</option><option value="new">New pools</option><option value="search">Search</option></select>
+<input id="q" placeholder="Search name or address">
+<select id="limit"><option>10</option><option>15</option><option>20</option></select>
+<select id="tf"><option value="minute:5">5m candles</option><option value="minute:15" selected>15m candles</option><option value="hour:1">1h candles</option></select>
+<button id="go">Scan</button>
+<select id="fv"><option value="">All verdicts</option><option value="HIGH">High X</option><option value="MEDIUM">Medium</option><option value="SKIP">Skip</option><option value="REJECT">Rejected</option></select>
+<input id="mn" type="number" placeholder="Min MCap $"><input id="mx" type="number" placeholder="Max MCap $"><input id="ms" type="number" placeholder="Min score">
+<label><input type="checkbox" id="hr" checked> Hide rejected</label></div>
+<div id="status"></div>
+<div class="wrap"><table><thead><tr id="h"></tr></thead><tbody id="b"></tbody></table></div>
+<script>
+const $=i=>document.getElementById(i),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=x=>x==null?'-':x>=1e9?(x/1e9).toFixed(2)+'B':x>=1e6?(x/1e6).toFixed(2)+'M':x>=1e3?(x/1e3).toFixed(1)+'K':x.toFixed(0);
+const p1=x=>x==null?'?':x.toFixed(1)+'%';
+const COLS=[['sym','Token'],['mc','MCap'],['ath','% from ATH'],['ageH','Age'],['vmc','Vol/MCap'],['top10','Top10'],['crowd','Insiders+'],['smart','Smart $'],['total','Score /50'],['verdict','Multi-X'],['hunter','Hunter /40'],['state','State'],['entry','Entry (MCap)'],['tp','TP1 2x / TP2 5x / TP3 10x'],['sl','SL']];
+let rows=[],sk='total',sd=-1;
+const age=h=>h==null?'-':h<1?Math.round(h*60)+'m':h<48?h.toFixed(0)+'h':(h/24).toFixed(0)+'d';
+const crowd=r=>r.insider==null?null:(r.sniper||0)+(r.insider||0)+(r.bundler||0);
+function head(){$('h').innerHTML=COLS.map(([k,l])=>`<th data-k="${k}">${l}${k===sk?(sd<0?' ▾':' ▴'):''}</th>`).join('')}
+$('h').onclick=e=>{const k=e.target.dataset.k;if(!k)return;sd=k===sk?-sd:-1;sk=k;head();draw()};
+function draw(){
+  const v=$('fv').value,mn=+$('mn').value||0,mx=+$('mx').value||Infinity,ms=+$('ms').value||0,hr=$('hr').checked;
+  const val=r=>sk==='crowd'?crowd(r)??-1:sk==='tp'?r.tp1:sk==='hunter'?r.h?.total:r[sk]??-1;
+  const list=rows.filter(r=>(!v||r.verdict===v)&&r.mc>=mn&&r.mc<=mx&&r.total>=ms&&!(hr&&r.verdict==='REJECT'&&v!=='REJECT'))
+    .sort((a,b)=>{const x=val(a),y=val(b);return(x>y?1:x<y?-1:0)*sd});
+  $('b').innerHTML=list.length?list.map(r=>`<tr><td><span class="sym">${esc(r.sym)}</span><div class="sm">${esc(r.addr.slice(0,6))}…${esc(r.addr.slice(-4))}
+    ${r.rej.length?`· <span class="down">${esc(r.rej.join(', '))}</span>`:''}${r.warn&&r.warn.length?` · <span style="color:#b7791f">${esc(r.warn.slice(0,2).join(', '))}</span>`:''}${r.miss.length?` · missing: ${esc(r.miss.join(', '))}`:''}${r.signal?` · RSI ${r.rsi.toFixed(0)}, ${esc(r.signal)}`:''}</div></td>
+    <td>$${fmt(r.mc)}</td><td class="${r.ath<=-50?'down':''}" title="${r.athMc?'ATH MCap $'+fmt(r.athMc):''}">${r.ath==null?'?':r.ath.toFixed(0)+'%'}</td><td>${age(r.ageH)}</td><td>${r.vmc.toFixed(0)}%</td><td>${p1(r.top10)}</td><td>${crowd(r)==null?'?':crowd(r).toFixed(1)+'%'}</td><td>${r.smart??'?'}</td>
+    <td><b>${r.total.toFixed(1)}</b></td><td><span class="pill ${r.verdict}">${{HIGH:'High X',MEDIUM:'Medium',SKIP:'Skip',REJECT:'Reject'}[r.verdict]}</span></td><td>${r.h?r.h.total.toFixed(0)+' · '+r.h.verdict:'?'}</td><td class="${r.state}">${r.state}</td>
+    <td>${r.entryLo?`$${fmt(r.entryLo)}–$${fmt(r.entryHi)}`:'$'+fmt(r.entry)}</td><td>$${fmt(r.tp1)} / $${fmt(r.tp2)} / $${fmt(r.tp3)}</td><td>$${fmt(r.sl)}</td></tr>`).join('')
+    :'<tr><td colspan="15" style="text-align:center;color:#6b7683;padding:24px">Nothing to show yet. Press Scan or loosen the filters.</td></tr>'}
+async function scan(){
+  rows=[];draw();$('go').disabled=true;$('status').textContent='Scanning… tokens appear as they finish (about 6 to 9 seconds each).';
+  const q=new URLSearchParams({mode:$('mode').value,q:$('q').value,limit:$('limit').value,tf:$('tf').value});
+  try{const r=await fetch('/api/scan?'+q),rd=r.body.getReader(),dec=new TextDecoder();let buf='',tot=0;
+    for(;;){const{done,value}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});const ls=buf.split('\n');buf=ls.pop();
+      for(const l of ls){if(!l)continue;const m=JSON.parse(l);
+        if(m.error){$('status').textContent='Error: '+m.error;continue}
+        if(m.meta){tot=m.meta.total;continue}
+        rows.push(m);draw();if($('status').textContent.startsWith('Scanning'))$('status').textContent=`Scanned ${rows.length} of ${tot}…`}}
+    if(!$('status').textContent.startsWith('Error'))$('status').textContent=`Done: ${rows.length} tokens at ${new Date().toLocaleTimeString()}`;
+  }catch(e){$('status').textContent='Scan failed: '+e.message}
+  $('go').disabled=false}
+$('go').onclick=scan;['fv','mn','mx','ms','hr'].forEach(i=>$(i).oninput=draw);head();draw();
+</script></body></html>
