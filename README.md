@@ -6,3 +6,4 @@ Data: DexScreener + GeckoTerminal (market data, candles, ATH) and RugCheck (auth
 Optional: GMGN_API_KEY + `npm install -g gmgn-cli` adds smart-money, sniper and bundler data.
 Home page = paste-a-CA checker. /scanner.html = multi-token scanner.
 If a column shows "?" open http://localhost:3000/api/debug/<token_address> to see the raw responses.
+# sparky-screener
