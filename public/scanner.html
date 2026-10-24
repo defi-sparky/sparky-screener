@@ -48,16 +48,20 @@ function draw(){
     <td><b>${r.total.toFixed(1)}</b></td><td><span class="pill ${r.verdict}">${{HIGH:'High X',MEDIUM:'Medium',SKIP:'Skip',REJECT:'Reject'}[r.verdict]}</span></td><td>${r.h?r.h.total.toFixed(0)+' · '+r.h.verdict:'?'}</td><td class="${r.state}">${r.state}</td>
     <td>${r.entryLo?`$${fmt(r.entryLo)}–$${fmt(r.entryHi)}`:'$'+fmt(r.entry)}</td><td>$${fmt(r.tp1)} / $${fmt(r.tp2)} / $${fmt(r.tp3)}</td><td>$${fmt(r.sl)}</td></tr>`).join('')
     :'<tr><td colspan="15" style="text-align:center;color:#6b7683;padding:24px">Nothing to show yet. Press Scan or loosen the filters.</td></tr>'}
+const nap=ms=>new Promise(r=>setTimeout(r,ms));
 async function scan(){
-  rows=[];draw();$('go').disabled=true;$('status').textContent='Scanning… tokens appear as they finish (about 6 to 9 seconds each).';
-  const q=new URLSearchParams({mode:$('mode').value,q:$('q').value,limit:$('limit').value,tf:$('tf').value});
-  try{const r=await fetch('/api/scan?'+q),rd=r.body.getReader(),dec=new TextDecoder();let buf='',tot=0;
-    for(;;){const{done,value}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});const ls=buf.split('\n');buf=ls.pop();
-      for(const l of ls){if(!l)continue;const m=JSON.parse(l);
-        if(m.error){$('status').textContent='Error: '+m.error;continue}
-        if(m.meta){tot=m.meta.total;continue}
-        rows.push(m);draw();if($('status').textContent.startsWith('Scanning'))$('status').textContent=`Scanned ${rows.length} of ${tot}…`}}
-    if(!$('status').textContent.startsWith('Error'))$('status').textContent=`Done: ${rows.length} tokens at ${new Date().toLocaleTimeString()}`;
+  rows=[];draw();$('go').disabled=true;$('status').textContent='Finding tokens…';
+  const q=new URLSearchParams({mode:$('mode').value,q:$('q').value,limit:$('limit').value});
+  try{
+    const l=await (await fetch('/api/list?'+q)).json();
+    if(l.error){$('status').textContent='Error: '+l.error;$('go').disabled=false;return}
+    let bad=0;
+    for(let i=0;i<l.list.length;i++){
+      $('status').textContent=`Checking token ${i+1} of ${l.list.length}…`;
+      try{const r=await (await fetch('/api/token?ca='+l.list[i]+'&tf='+$('tf').value)).json();
+        if(r.error)bad++;else{rows.push(r);draw()}}catch(e){bad++}
+      await nap(1200)}
+    $('status').textContent=`Done: ${rows.length} tokens at ${new Date().toLocaleTimeString()}`+(bad?` (${bad} could not be checked)`:'')
   }catch(e){$('status').textContent='Scan failed: '+e.message}
   $('go').disabled=false}
 $('go').onclick=scan;['fv','mn','mx','ms','hr'].forEach(i=>$(i).oninput=draw);head();draw();

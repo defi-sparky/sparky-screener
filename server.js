@@ -94,7 +94,7 @@ async function chart(p, tf) {
 }
 
 // ---- holder history, to tell whether holders are growing between checks
-const HF = path.join(__dirname, '.holders.json'); let HIST = {};
+const HF = process.env.VERCEL ? '/tmp/.holders.json' : path.join(__dirname, '.holders.json'); let HIST = {};
 try { HIST = JSON.parse(fs.readFileSync(HF, 'utf8')); } catch {}
 function holdersGrowing(ca, h) {
   if (h == null) return null;
@@ -176,7 +176,8 @@ async function athOf(p) {
 }
 
 // ---- the scoring from the prompt (score /50, hard filters first)
-async function analyze(p, tf) {
+async function analyze(p, tf, fast) {
+  const nap = () => sleep(fast ? 500 : 2200);
   const o = { sym: p.sym, addr: p.addr, mc: p.mc, liq: p.liq, v24: p.v24, ch24: p.ch24, ageH: p.created ? (Date.now() - p.created) / 36e5 : null };
   const miss = [], rej = [], warn = [], notes = [];
   o.vmc = p.mc ? p.v24 / p.mc * 100 : 0;
@@ -228,11 +229,11 @@ async function analyze(p, tf) {
   bad(crowd > 25, 'Insiders/snipers/bundlers > 25%'); bad(p.liq < 15000 || (p.mc && p.liq / p.mc < .05), 'Thin liquidity');
 
   // % from ATH (daily candles since pool creation)
-  try { const a = await athOf(p); if (a) { o.ath = a.pct; o.athMc = a.mc; } await sleep(2200); } catch (e) { notes.push('ATH: ' + e.message); }
+  try { const a = await athOf(p); if (a) { o.ath = a.pct; o.athMc = a.mc; } await nap(); } catch (e) { notes.push('ATH: ' + e.message); }
   if (o.ath == null) miss.push('ATH');
   if (p.mk == null && p.pool) try {                     // makers (unique traders) and 30m buys
     const t = (await j(`https://api.geckoterminal.com/api/v2/networks/solana/pools/${p.pool}`)).data?.attributes?.transactions || {};
-    if (t.h24?.buyers != null) p.mk = t.h24.buyers + (t.h24.sellers || 0); p.m30b = t.m30?.buys ?? null; await sleep(2200);
+    if (t.h24?.buyers != null) p.mk = t.h24.buyers + (t.h24.sellers || 0); p.m30b = t.m30?.buys ?? null; await nap();
   } catch (e) { notes.push('Makers: ' + e.message); }
   o.makers = p.mk;
   bad(o.ath != null && o.ath <= -80, 'Down 80%+ from ATH'); bad(p.ch24 <= -80, 'Down 80%+ in 24h');
@@ -245,7 +246,7 @@ async function analyze(p, tf) {
   const sm = smart == null ? null : s10(smart, 0, 3);
   const dist = (top10 == null && dev == null) ? 4 : 10 - clamp(((top10 ?? 20) - 10) / 25 * 5, 0, 5) - clamp(crowd / 25 * 3, 0, 3) - clamp((dev || 0) / 5 * 2, 0, 2);
   let ch = null, cs = 3;
-  try { ch = await chart(p, tf); await sleep(2200); } catch (e) { notes.push('Candles: ' + e.message); }
+  try { ch = await chart(p, tf); await nap(); } catch (e) { notes.push('Candles: ' + e.message); }
   if (ch) { cs = ch.rsi > 70 ? 3 : ch.rsi >= 40 && ch.rsi <= 60 ? 9 : ch.rsi < 30 ? 5 : 6; if (ch.inZone) cs += 1; if (!ch.up) cs -= 3; cs = clamp(cs, 0, 10); }
   else miss.push('candles');
   o.scores = { room, demand, smart: sm, dist, chart: cs };
@@ -265,7 +266,7 @@ async function analyze(p, tf) {
 }
 
 // ---- server
-const server = http.createServer(async (req, res) => {
+const handler = async (req, res) => {
   const u = new URL(req.url, 'http://x');
   if (u.pathname === '/api/scan') {
     res.writeHead(200, { 'content-type': 'application/x-ndjson', 'cache-control': 'no-store' });
@@ -277,6 +278,12 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { res.write(JSON.stringify({ error: e.message }) + '\n'); }
     return res.end();
   }
+  if (u.pathname === '/api/list') {                       // candidate addresses only (the page then checks them one by one)
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    try { const l = (await candidates(u.searchParams.get('mode') || 'trend', u.searchParams.get('q') || '')).filter(p => p.addr && p.pool);
+      return res.end(JSON.stringify({ list: [...new Set(l.map(p => p.addr))].slice(0, clamp(+u.searchParams.get('limit') || 10, 1, 20)) }));
+    } catch (e) { return res.end(JSON.stringify({ error: e.message })); }
+  }
   if (u.pathname === '/api/token') {                      // single contract address lookup
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     const ca = (u.searchParams.get('ca') || '').trim();
@@ -285,11 +292,11 @@ const server = http.createServer(async (req, res) => {
       const pairs = await j('https://api.dexscreener.com/tokens/v1/solana/' + ca);
       const best = (pairs || []).filter(p => p.baseToken.address === ca).sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0))[0];
       if (!best) return res.end(JSON.stringify({ error: 'No Solana trading pair found for this address yet.' }));
-      return res.end(JSON.stringify(await analyze(fromDex(best), u.searchParams.get('tf') || 'minute:15')));
+      return res.end(JSON.stringify(await analyze(fromDex(best), u.searchParams.get('tf') || 'minute:15', true)));
     } catch (e) { return res.end(JSON.stringify({ error: e.message })); }
   }
-  if (u.pathname.startsWith('/api/debug/')) {          // raw GMGN output, to verify field names
-    const a = u.pathname.split('/').pop(); res.writeHead(200, { 'content-type': 'application/json' });
+  if (u.pathname.startsWith('/api/debug')) {          // raw GMGN output, to verify field names
+    const a = u.searchParams.get('ca') || u.pathname.split('/').pop(); res.writeHead(200, { 'content-type': 'application/json' });
     if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a)) return res.end('{"error":"bad address"}');
     const c = ['--chain', 'sol', '--address', a], out = {};
     out.rugcheck = await rc(a).catch(e => ({ error: e.message }));
@@ -299,7 +306,7 @@ const server = http.createServer(async (req, res) => {
   const f = path.join(__dirname, 'public', u.pathname === '/' ? 'index.html' : path.basename(u.pathname));
   fs.readFile(f, (e, d) => { if (e) { res.writeHead(404); return res.end('Not found'); }
     res.writeHead(200, { 'content-type': f.endsWith('.html') ? 'text/html' : 'text/plain' }); res.end(d); });
-});
-if (require.main === module) server.listen(PORT, '127.0.0.1', () => console.log(`Sparky Screener on http://localhost:${PORT}  (GMGN key ${KEY ? 'loaded' : 'MISSING'})`));
+};
+if (require.main === module) http.createServer(handler).listen(PORT, '127.0.0.1', () => console.log(`Sparky Screener on http://localhost:${PORT}  (GMGN key ${KEY ? 'loaded' : 'MISSING'})`));
 
-module.exports = { hunter, macd, kdj, rsi };
+module.exports = { handler, hunter, macd, kdj, rsi };
